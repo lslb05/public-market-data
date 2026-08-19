@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from dados_mercado_publico.cli import main
@@ -9,8 +10,9 @@ from .conftest import CriaCliente
 
 
 @pytest.fixture(autouse=True)
-def dados_em_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def dados_em_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dsn: str) -> None:
     monkeypatch.setenv("DADOS_MERCADO_PUBLICO_DADOS_DIR", str(tmp_path))
+    monkeypatch.setenv("DADOS_MERCADO_PUBLICO_POSTGRES_DSN", dsn)
     monkeypatch.delenv("DADOS_MERCADO_PUBLICO_FRED_API_KEY", raising=False)
 
 
@@ -29,10 +31,13 @@ def test_consultar_imprime_a_safra_daquela_data(
     cliente_falso: CriaCliente,
     corpo_fred: bytes,
     tmp_path: Path,
+    conexao: psycopg.Connection,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     cliente, _ = cliente_falso(200, corpo_fred)
-    ingerir_fred(serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente)
+    ingerir_fred(
+        serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente, conexao=conexao
+    )
 
     codigo = main(
         ["consultar", "--fonte", "fred", "--serie", "GDP", "--em", "2020-05-01"]

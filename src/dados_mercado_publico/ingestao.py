@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import psycopg
 
 from dados_mercado_publico import bruto
 from dados_mercado_publico.analitico import publicar
@@ -13,7 +14,14 @@ from dados_mercado_publico.fontes import fred
 _log = logging.getLogger(__name__)
 
 
-def ingerir_fred(*, serie: str, chave: str, raiz: Path, cliente: httpx.Client) -> int:
+def ingerir_fred(
+    *,
+    serie: str,
+    chave: str,
+    raiz: Path,
+    cliente: httpx.Client,
+    conexao: psycopg.Connection,
+) -> int:
     """Devolve quantas linhas a série tem depois desta execução."""
     inicio = datetime.now(UTC)
     _log.info("ingestao iniciada fonte=fred serie=%s", serie)
@@ -35,7 +43,8 @@ def ingerir_fred(*, serie: str, chave: str, raiz: Path, cliente: httpx.Client) -
         _log.info("conteudo identico ao anterior; sem particao nova serie=%s", serie)
 
     total = publicar(
-        raiz / "analitico" / "fred" / f"{serie}.parquet",
+        conexao,
+        fonte="fred",
         serie=serie,
         observacoes=observacoes,
         coletado_em=inicio,

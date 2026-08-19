@@ -6,11 +6,13 @@ import sys
 from datetime import date
 
 import httpx
+import psycopg
 
-from dados_mercado_publico.analitico import consultar_em
+from dados_mercado_publico.analitico import consultar_em, existe
 from dados_mercado_publico.config import Settings
 from dados_mercado_publico.erros import ErroDeFonte
 from dados_mercado_publico.ingestao import ingerir_fred
+from dados_mercado_publico.postgres import conectar
 
 
 def _argumentos(argv: list[str] | None) -> argparse.Namespace:
@@ -37,38 +39,45 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
-    if argumentos.comando == "ingerir":
-        if not config.fred_api_key:
-            print(
-                "defina DADOS_MERCADO_PUBLICO_FRED_API_KEY (chave gratuita do FRED)",
-                file=sys.stderr,
-            )
-            return 2
-        try:
-            with httpx.Client() as cliente:
-                total = ingerir_fred(
-                    serie=argumentos.serie,
-                    chave=config.fred_api_key,
-                    raiz=config.dados_dir,
-                    cliente=cliente,
-                )
-        except ErroDeFonte as erro:
-            print(f"falha na fonte: {erro}", file=sys.stderr)
-            return 1
-        print(f"{total} linhas em {argumentos.serie}")
-        return 0
-
-    parquet = (
-        config.dados_dir
-        / "analitico"
-        / argumentos.fonte
-        / f"{argumentos.serie}.parquet"
-    )
-    if not parquet.exists():
-        print(f"série não ingerida: {argumentos.serie}", file=sys.stderr)
+    try:
+        conexao = conectar(config.postgres_dsn)
+    except psycopg.OperationalError as erro:
+        print(f"não foi possível conectar ao Postgres: {erro}", file=sys.stderr)
         return 2
-    quadro = consultar_em(parquet, serie=argumentos.serie, em=argumentos.em)
-    # CSV em vez do repr do Polars: a saída é pipeável e não depende do
-    # console conseguir codificar os caracteres de desenho de caixa.
-    print(quadro.write_csv().rstrip())
-    return 0
+
+    try:
+        if argumentos.comando == "ingerir":
+            if not config.fred_api_key:
+                print(
+                    "defina DADOS_MERCADO_PUBLICO_FRED_API_KEY "
+                    "(chave gratuita do FRED)",
+                    file=sys.stderr,
+                )
+                return 2
+            try:
+                with httpx.Client() as cliente:
+                    total = ingerir_fred(
+                        serie=argumentos.serie,
+                        chave=config.fred_api_key,
+                        raiz=config.dados_dir,
+                        cliente=cliente,
+                        conexao=conexao,
+                    )
+            except ErroDeFonte as erro:
+                print(f"falha na fonte: {erro}", file=sys.stderr)
+                return 1
+            print(f"{total} linhas em {argumentos.serie}")
+            return 0
+
+        if not existe(conexao, fonte=argumentos.fonte, serie=argumentos.serie):
+            print(f"série não ingerida: {argumentos.serie}", file=sys.stderr)
+            return 2
+        quadro = consultar_em(
+            conexao, fonte=argumentos.fonte, serie=argumentos.serie, em=argumentos.em
+        )
+        # CSV em vez do repr do Polars: a saída é pipeável e não depende do
+        # console conseguir codificar os caracteres de desenho de caixa.
+        print(quadro.write_csv().rstrip())
+        return 0
+    finally:
+        conexao.close()

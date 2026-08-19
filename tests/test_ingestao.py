@@ -2,6 +2,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from dados_mercado_publico.analitico import consultar_em
@@ -11,36 +12,52 @@ from .conftest import CriaCliente
 
 
 def test_consulta_em_data_passada_ignora_revisao(
-    cliente_falso: CriaCliente, corpo_fred: bytes, tmp_path: Path
+    cliente_falso: CriaCliente,
+    corpo_fred: bytes,
+    tmp_path: Path,
+    conexao: psycopg.Connection,
 ) -> None:
     cliente, _ = cliente_falso(200, corpo_fred)
-    ingerir_fred(serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente)
-    parquet = tmp_path / "analitico" / "fred" / "GDP.parquet"
+    ingerir_fred(
+        serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente, conexao=conexao
+    )
 
-    antes = consultar_em(parquet, serie="GDP", em=date(2020, 5, 1))
-    depois = consultar_em(parquet, serie="GDP", em=date(2020, 6, 1))
+    antes = consultar_em(conexao, fonte="fred", serie="GDP", em=date(2020, 5, 1))
+    depois = consultar_em(conexao, fonte="fred", serie="GDP", em=date(2020, 6, 1))
 
     assert antes["valor"].to_list() == [pytest.approx(21561.139)]
     assert depois["valor"].to_list() == [pytest.approx(21481.367)]
 
 
 def test_reingestao_nao_duplica(
-    cliente_falso: CriaCliente, corpo_fred: bytes, tmp_path: Path
+    cliente_falso: CriaCliente,
+    corpo_fred: bytes,
+    tmp_path: Path,
+    conexao: psycopg.Connection,
 ) -> None:
     cliente, _ = cliente_falso(200, corpo_fred)
 
-    primeira = ingerir_fred(serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente)
-    segunda = ingerir_fred(serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente)
+    primeira = ingerir_fred(
+        serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente, conexao=conexao
+    )
+    segunda = ingerir_fred(
+        serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente, conexao=conexao
+    )
 
     assert primeira == segunda == 3
     assert len(list((tmp_path / "bruto" / "fred" / "GDP").glob("coleta=*"))) == 1
 
 
 def test_zona_bruta_guarda_o_corpo_original(
-    cliente_falso: CriaCliente, corpo_fred: bytes, tmp_path: Path
+    cliente_falso: CriaCliente,
+    corpo_fred: bytes,
+    tmp_path: Path,
+    conexao: psycopg.Connection,
 ) -> None:
     cliente, _ = cliente_falso(200, corpo_fred)
-    ingerir_fred(serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente)
+    ingerir_fred(
+        serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente, conexao=conexao
+    )
 
     particao = next((tmp_path / "bruto" / "fred" / "GDP").glob("coleta=*"))
 
@@ -48,11 +65,18 @@ def test_zona_bruta_guarda_o_corpo_original(
 
 
 def test_manifesto_nao_guarda_a_chave_de_api(
-    cliente_falso: CriaCliente, corpo_fred: bytes, tmp_path: Path
+    cliente_falso: CriaCliente,
+    corpo_fred: bytes,
+    tmp_path: Path,
+    conexao: psycopg.Connection,
 ) -> None:
     cliente, _ = cliente_falso(200, corpo_fred)
     ingerir_fred(
-        serie="GDP", chave="segredo-do-usuario", raiz=tmp_path, cliente=cliente
+        serie="GDP",
+        chave="segredo-do-usuario",
+        raiz=tmp_path,
+        cliente=cliente,
+        conexao=conexao,
     )
 
     caminho = next(
