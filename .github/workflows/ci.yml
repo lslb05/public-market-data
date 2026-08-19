@@ -30,3 +30,26 @@ jobs:
       - name: Check
         run: uv run python scripts/check.py
 
+  airflow-dag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Airflow image
+        run: docker compose build airflow-init
+
+      - name: Migrate metadata database and create admin user
+        run: docker compose up airflow-init
+
+      - name: Check DAG import errors
+        run: |
+          docker compose run --rm airflow-scheduler airflow dags list-import-errors \
+            | tee import_errors.txt
+          ! grep -q '/opt/airflow/dags' import_errors.txt
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
+

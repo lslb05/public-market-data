@@ -1,3 +1,23 @@
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://dados:dados@postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    # Rede interna do compose: a aplicação, dentro do container, fala com o
+    # Postgres pela porta 5432 de sempre — o remapeamento para 5433 é só no
+    # host, para não colidir com outro Postgres desta máquina.
+    DADOS_MERCADO_PUBLICO_POSTGRES_DSN: postgresql://dados:dados@postgres:5432/dados_mercado_publico
+    DADOS_MERCADO_PUBLICO_FRED_API_KEY: ${DADOS_MERCADO_PUBLICO_FRED_API_KEY:-}
+  volumes:
+    - ./dags:/opt/airflow/dags
+  depends_on:
+    postgres:
+      condition: service_healthy
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -10,11 +30,36 @@ services:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-airflow-db.sql:/docker-entrypoint-initdb.d/init-airflow-db.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dados -d dados_mercado_publico"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db migrate && airflow users create --username admin --password admin
+        --firstname admin --lastname admin --role Admin --email admin@example.com
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8081:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

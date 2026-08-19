@@ -45,12 +45,14 @@ código é o mesmo; só a chamada HTTP é substituída.
   domínio público; a documentação da API está em
   <https://fred.stlouisfed.org/docs/api/fred/>.
 - **Fora de escopo:** modelo, sinal e backtest, que são outro repositório;
-  orquestrador; Postgres; dado intradiário; e qualquer fonte que exija
-  credencial institucional.
+  dado intradiário; e qualquer fonte que exija credencial institucional.
 
 ## Arquitetura
 
 ```
+Airflow (DAG ingestao_fred, @daily)
+    │  chama dados_mercado_publico.ingestao.ingerir_fred
+    ▼
 API do FRED
     │  httpx, timeout e 3 tentativas
     ▼
@@ -60,9 +62,19 @@ contratos.py      Pydantic valida na fronteira; campo novo levanta erro
     │                  dados.json (o que a fonte mandou, byte a byte)
     │                  manifesto.json (url, sha256, contrato, linhas)
     │
-    └─► analitico.py   data/analitico/fred/<serie>.parquet
-                       consulta em DuckDB por data de conhecimento
+    └─► analitico.py   Postgres, tabela series_vintage
+                       consulta por data de conhecimento
 ```
+
+O DAG (`dags/ingestao_fred.py`) não duplica lógica: chama a mesma função que
+o CLI chama. A única coisa que o Airflow adiciona é agendamento e retentativa
+de orquestração — a idempotência e o tratamento de erro de fonte já existiam.
+
+`series_vintage(fonte, serie, data_evento, data_publicacao, vigente_ate,
+valor, data_disponibilidade)` é a interface pública deste projeto: qualquer
+outro repositório lê dela via `DADOS_MERCADO_PUBLICO_POSTGRES_DSN`, sem
+importar código daqui. Chave primária `(fonte, serie, data_evento,
+data_publicacao)` — mesma chave de idempotência de sempre.
 
 Três decisões que valem explicação:
 
@@ -79,22 +91,50 @@ uma limitação real e está registrada aqui em vez de maquiada.
 
 **Idempotência por hash do corpo.** Reexecutar a ingestão sem que a fonte tenha
 mudado não cria partição nova nem duplica linha adiante. A chave da camada
-analítica é `(serie, data_evento, data_publicacao)`, e a primeira ocorrência
-vence, preservando quando aquele valor foi visto pela primeira vez.
+analítica é `(fonte, serie, data_evento, data_publicacao)`, e a primeira
+ocorrência vence, preservando quando aquele valor foi visto pela primeira vez —
+é por isso que o Airflow pode reexecutar o DAG livremente sem duplicar dado.
 
 ## Executar localmente
 
-Requisitos: Python 3.12 e [`uv`](https://docs.astral.sh/uv/).
+Requisitos: Python 3.12, [`uv`](https://docs.astral.sh/uv/) e Docker (para o
+Postgres local).
 
 ```bash
 uv sync
 cp .env.example .env      # e preencha a chave do FRED
+docker compose up -d      # sobe o Postgres em localhost:5433
 uv run python -m dados_mercado_publico ingerir --fonte fred --serie GDP
 uv run python -m dados_mercado_publico consultar --fonte fred --serie GDP --em 2020-05-01
 ```
 
 A chave do FRED é gratuita: <https://fredaccount.stlouisfed.org/apikeys>. Sem
-ela o comando `ingerir` orienta e sai com código 2, em vez de estourar.
+ela o comando `ingerir` orienta e sai com código 2, em vez de estourar. Sem o
+Postgres de pé, qualquer comando orienta e sai com código 2 da mesma forma.
+
+O schema (`series_vintage`) é criado automaticamente na primeira conexão —
+não há passo de migração separado.
+
+### Airflow
+
+`docker-compose.yml` também sobe o Airflow (`LocalExecutor`, sem
+Celery/Redis — é a forma mais simples que ainda é um Airflow real, adequada
+ao volume de um projeto de portfólio):
+
+```bash
+docker compose up -d              # postgres + airflow-init (uma vez) + scheduler
+docker compose up -d airflow-webserver
+```
+
+UI em <http://localhost:8081> (usuário/senha `admin`/`admin`, criados pelo
+`airflow-init`). O DAG `ingestao_fred` roda `@daily`; para disparar manualmente:
+
+```bash
+docker compose exec airflow-scheduler airflow dags trigger ingestao_fred
+```
+
+O metadado do Airflow vive num banco Postgres separado (`airflow`) no mesmo
+servidor do `series_vintage` — dois bancos, uma instância, sem infra extra.
 
 Verificação:
 
@@ -117,9 +157,13 @@ uv run python scripts/format.py    # aplica formatação e correções
 
 ## Limitações
 
-- Uma fonte só. BCB SGS, CVM, SEC EDGAR e preço EOD são os próximos cortes.
+- Uma fonte só. BCB SGS, CVM, SEC EDGAR e preço EOD são os próximos cortes —
+  cada uma vira uma task nova no mesmo DAG ou um DAG próprio.
 - O ALFRED expõe safras; nem toda fonte expõe. Onde não houver, o
   point-in-time será mais fraco e isso ficará documentado por fonte.
-- Sem orquestrador. O CLI é a interface, e o agendamento vem depois.
-- A camada analítica é um Parquet por série. Serve ao volume atual; não é a
-  resposta para quando houver muitas séries.
+- `LocalExecutor`, não `CeleryExecutor`/`KubernetesExecutor`: paralelismo
+  limitado a uma máquina. Suficiente para o volume de séries deste projeto;
+  reveja se algum dia isso virar gargalo real.
+- Postgres e Airflow locais via `docker-compose`; produção (credencial,
+  backup, alta disponibilidade) fica para quando houver um ambiente real
+  para hospedar.
