@@ -4,7 +4,7 @@ import psycopg
 import pytest
 
 from dados_mercado_publico.cli import main
-from dados_mercado_publico.ingestao import ingerir_fred
+from dados_mercado_publico.ingestao.fred import ingerir_fred
 
 from .conftest import CriaCliente
 

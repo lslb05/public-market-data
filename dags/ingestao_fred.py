@@ -12,7 +12,7 @@ import httpx
 from airflow.decorators import dag, task
 
 from dados_mercado_publico.config import Settings
-from dados_mercado_publico.ingestao import ingerir_fred
+from dados_mercado_publico.ingestao.fred import ingerir_fred
 from dados_mercado_publico.postgres import conectar
 
 SERIES_FRED = ["GDP"]

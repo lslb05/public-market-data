@@ -11,7 +11,7 @@ import psycopg
 from dados_mercado_publico.analitico import consultar_em, existe
 from dados_mercado_publico.config import Settings
 from dados_mercado_publico.erros import ErroDeFonte
-from dados_mercado_publico.ingestao import ingerir_fred
+from dados_mercado_publico.ingestao.fred import ingerir_fred
 from dados_mercado_publico.postgres import conectar
 
 

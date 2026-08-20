@@ -51,12 +51,13 @@ código é o mesmo; só a chamada HTTP é substituída.
 
 ```
 Airflow (DAG ingestao_fred, @daily)
-    │  chama dados_mercado_publico.ingestao.ingerir_fred
+    │  chama dados_mercado_publico.ingestao.fred.ingerir_fred
     ▼
 API do FRED
     │  httpx, timeout e 3 tentativas
     ▼
-contratos.py      Pydantic valida na fronteira; campo novo levanta erro
+fontes/fred.py     adaptador: busca + contrato Pydantic (ObservacaoFred).
+    │               campo novo no payload é mudança de schema, levanta erro
     │
     ├─► bruto.py       data/bruto/<fonte>/<serie>/coleta=<carimbo>/
     │                  dados.json (o que a fonte mandou, byte a byte)
@@ -69,6 +70,25 @@ contratos.py      Pydantic valida na fronteira; campo novo levanta erro
 O DAG (`dags/ingestao_fred.py`) não duplica lógica: chama a mesma função que
 o CLI chama. A única coisa que o Airflow adiciona é agendamento e retentativa
 de orquestração — a idempotência e o tratamento de erro de fonte já existiam.
+
+**Organização por fonte, pensada para a próxima fonte entrar sem bagunçar a
+atual.** `fontes/<fonte>.py` é o adaptador (fala com a API, valida o payload
+e devolve objetos que satisfazem `analitico.Observacao` — um `Protocol`
+estrutural de quatro campos, não uma classe pra herdar). `ingestao/<fonte>.py`
+é o caso de uso que liga esse adaptador ao genérico (`bruto`, `analitico`,
+`postgres`) — por isso é uma pasta separada de `fontes/`, não o mesmo
+arquivo: adaptador e orquestração mudam por motivos diferentes. O que é
+realmente agnóstico de fonte (`bruto.py`, `postgres.py`, `analitico.py`,
+`erros.py`, `schema.sql`, `cli.py`) fica solto na raiz do pacote, sem pasta,
+porque não cresce por fonte — cresce por decisão de infraestrutura.
+
+Fonte simples (FRED, um endpoint JSON) cabe num arquivo só. Fonte mais
+complexa (ex.: CVM, com múltiplos datasets e download de ZIP) vira uma pasta
+— `fontes/cvm/{__init__.py, contratos.py, download.py}` — quando acumular
+mais de um motivo pra dividir (parsing não trivial, contrato grande,
+paginação própria). A promoção de arquivo pra pasta é decidida fonte a
+fonte, quando a complexidade real aparecer, não antecipada para todas de
+uma vez.
 
 `series_vintage(fonte, serie, data_evento, data_publicacao, vigente_ate,
 valor, data_disponibilidade)` é a interface pública deste projeto: qualquer

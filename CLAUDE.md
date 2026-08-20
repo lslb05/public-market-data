@@ -87,8 +87,26 @@ altere `user.name` nem `user.email`.
   quebraria o `uv sync` do projeto; o CI valida isso num job separado
   (`airflow-dag` em `.github/workflows/ci.yml`) que builda a imagem e roda
   `airflow dags list-import-errors` dentro do container.
+- **Decidido:** quarto corte — reorganização por fonte, antes da 2ª fonte
+  chegar. `contratos.py` e `ingestao.py` eram arquivos "genéricos" que só
+  tinham FRED dentro; isso ia virar um arquivo crescendo por fonte, o
+  inverso do que o nome prometia. `ObservacaoFred`/`RespostaFred` foram pra
+  dentro de `fontes/fred.py` (o contrato mora junto do adaptador que o
+  produz); `ingerir_fred` virou `ingestao/fred.py` (pasta, um arquivo por
+  fonte, mesmo padrão de `fontes/`). `analitico.publicar()` parou de
+  importar `ObservacaoFred` pelo nome e passou a exigir um `Protocol`
+  estrutural (`analitico.Observacao`, quatro campos) — a camada
+  verdadeiramente agnóstica de fonte não pode depender de um tipo com nome
+  de fonte no meio. Regra registrada no README: arquivo por fonte é o
+  padrão; vira pasta (`fontes/<fonte>/{__init__,contratos,...}.py`) quando a
+  fonte acumular complexidade real (múltiplos endpoints, parsing não
+  trivial, contrato grande) — decidido fonte a fonte, não de uma vez.
+  `dags/` continua flat (`ingestao_<fonte>.py`), convenção padrão do
+  Airflow, sem subpasta.
 - **Pendente:** chave gratuita do FRED para a coleta ao vivo; os testes rodam
   offline com fixture versionada e não dependem dela.
 - **Próximo passo:** BCB SGS — a fonte sem safra, que força o limite via
-  `data_disponibilidade` a ser explícito, como uma task nova no DAG.
+  `data_disponibilidade` a ser explícito. Primeiro teste real da convenção
+  por fonte: `fontes/bcb.py`, `ingestao/bcb.py`, `dags/ingestao_bcb.py`, e
+  `cli.py` ganha `"bcb"` nas choices de `--fonte`.
 

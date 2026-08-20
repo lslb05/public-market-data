@@ -7,11 +7,11 @@ série, e não apenas a leitura de hoje.
 
 import logging
 import time
+from datetime import date
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from dados_mercado_publico.contratos import ObservacaoFred, RespostaFred
 from dados_mercado_publico.erros import ErroDeFonte, FonteIndisponivel, SchemaInesperado
 
 URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -21,6 +21,38 @@ _TENTATIVAS = 3
 _TIMEOUT_S = 30.0
 
 _log = logging.getLogger(__name__)
+
+
+class ObservacaoFred(BaseModel):
+    """Uma observação de série do ALFRED, na safra em que foi publicada.
+
+    `data_publicacao` é quando o valor passou a valer para `data_evento`, e
+    `vigente_ate` é o último dia em que ele foi a leitura corrente. É esse
+    par que permite reconstruir o que se sabia numa data passada. Os quatro
+    campos são o contrato estrutural que `analitico.Observacao` exige de
+    toda fonte.
+    """
+
+    # Campo novo no payload é mudança de schema: precisa parar a ingestão,
+    # não passar despercebido para dentro da camada analítica.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    data_evento: date = Field(alias="date")
+    data_publicacao: date = Field(alias="realtime_start")
+    vigente_ate: date = Field(alias="realtime_end")
+    valor: float | None = Field(alias="value")
+
+    @field_validator("valor", mode="before")
+    @classmethod
+    def _ponto_significa_ausente(cls, valor: object) -> object:
+        return None if valor == "." else valor
+
+
+class RespostaFred(BaseModel):
+    # O envelope carrega paginação e ordenação que não são contrato nosso.
+    model_config = ConfigDict(extra="ignore")
+
+    observations: list[ObservacaoFred]
 
 
 def buscar(

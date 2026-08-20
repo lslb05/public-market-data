@@ -2,13 +2,27 @@
 
 from collections.abc import Sequence
 from datetime import date, datetime
+from typing import Protocol
 
 import polars as pl
 import psycopg
 
-from dados_mercado_publico.contratos import ObservacaoFred
-
 _ESQUEMA_CONSULTA = {"data_evento": pl.Date, "valor": pl.Float64}
+
+
+class Observacao(Protocol):
+    """O que toda fonte precisa render pra entrar em series_vintage.
+
+    Estrutural, não herdado: o contrato de cada fonte (ObservacaoFred,
+    ObservacaoBCB, ...) mora perto do adaptador que o produz, em
+    `fontes/<fonte>.py`. Esta camada não conhece nenhum deles pelo nome —
+    só exige que tenham esses quatro campos.
+    """
+
+    data_evento: date
+    data_publicacao: date
+    vigente_ate: date
+    valor: float | None
 
 
 def publicar(
@@ -16,7 +30,7 @@ def publicar(
     *,
     fonte: str,
     serie: str,
-    observacoes: Sequence[ObservacaoFred],
+    observacoes: Sequence[Observacao],
     coletado_em: datetime,
 ) -> int:
     """Grava observações e devolve o total de linhas da série.
