@@ -1,7 +1,7 @@
 [project]
 name = "public-market-data"
 version = "0.1.0"
-description = "Replace with a one-line project description."
+description = "Public market data ingestion that preserves what was known on each date, so historical analysis doesn't use a future revision."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
