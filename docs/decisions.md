@@ -1,71 +1,100 @@
-# Decisões
+# Decisions
 
-Registre somente decisões que alterem custo de mudança futuro.
+Record only decisions that change the future cost of change.
 
-## Modelo
+## Template
 
-### AAAA-MM-DD — Título
+### YYYY-MM-DD — Title
 
-- **Contexto:** qual restrição ou problema exigiu decisão.
-- **Decisão:** o caminho escolhido.
-- **Alternativas:** opções relevantes descartadas.
-- **Consequências:** ganhos, custos e gatilho para revisar.
+- **Context:** what constraint or problem required a decision.
+- **Decision:** the path chosen.
+- **Alternatives:** relevant options discarded.
+- **Consequences:** gains, costs and the trigger to revisit.
 
-### 2026-08-18 — Manter `CLAUDE.md` e `AGENTS.md` no repositório público
+### 2026-08-18 — Keep `CLAUDE.md` and `AGENTS.md` in the public repository
 
-- **Contexto:** os dois arquivos declaram que o repositório é construído com
-  apoio de agentes. A alternativa era ignorá-los no git para que o repositório
-  público não revelasse o fluxo de trabalho.
-- **Decisão:** manter os dois versionados e públicos.
-- **Alternativas:** ignorar `AGENTS.md` no `.gitignore`; mantê-lo apenas local.
-  Ambas quebram a delegação ao Codex, que lê esse arquivo do repositório — o
-  custo é funcional e imediato, o ganho é cosmético.
-- **Consequências:** o repositório declara o método em vez de escondê-lo, o que
-  também é verificável por quem lê. Rever se algum destino exigir o contrário.
+- **Context:** both files declare that the repository is built with agent
+  support. The alternative was ignoring them in git so the public
+  repository wouldn't reveal the workflow.
+- **Decision:** keep both versioned and public.
+- **Alternatives:** ignore `AGENTS.md` in `.gitignore`; keep it local only.
+  Both break delegation to Codex, which reads this file from the
+  repository — the cost is functional and immediate, the gain is cosmetic.
+- **Consequences:** the repository states the method instead of hiding it,
+  which is also verifiable by whoever reads it. Revisit if some destination
+  ever requires the opposite.
 
-### 2026-08-19 — Camada analítica migra de Parquet/DuckDB para Postgres
+### 2026-08-19 — Analytics layer migrates from Parquet/DuckDB to Postgres
 
-- **Contexto:** este repositório vai virar a fonte de dados de vários outros
-  projetos de portfólio (nowcasting, crédito, vol/opções, IA), que precisam
-  consultar as mesmas séries sem importar código daqui. Um Parquet por série
-  não é uma interface de consumo razoável para múltiplos consumidores.
-- **Decisão:** a camada analítica passa a ser uma tabela Postgres
-  (`series_vintage`), local via `docker-compose.yml`. A zona bruta
-  (`bruto.py`) não muda — continua JSON imutável em disco.
-- **Alternativas:** manter Parquet e deixar cada projeto consumidor ler o
-  arquivo diretamente — acopla os consumidores ao layout de disco deste
-  repositório, e não resolve concorrência de escrita quando o Airflow entrar.
-- **Consequências:** ganho é uma interface de dados real (`DSN` + schema)
-  em vez de um caminho de arquivo; custo é depender de Postgres rodando
-  (local via Docker) até para os testes, que agora usam `testcontainers` e
-  exigem Docker na máquina que roda `pytest`. Rever se o volume de séries
-  algum dia justificar trocar Postgres por algo colunar.
+- **Context:** this repository is becoming the data source for several other
+  portfolio projects (nowcasting, credit, vol/options, AI), which need to
+  query the same series without importing code from here. One Parquet file
+  per series isn't a reasonable consumption interface for multiple
+  consumers.
+- **Decision:** the analytics layer becomes a Postgres table
+  (`series_vintage`), local via `docker-compose.yml`. The raw zone
+  (`raw.py`) doesn't change — it stays immutable JSON on disk.
+- **Alternatives:** keep Parquet and let each consuming project read the
+  file directly — couples consumers to this repository's disk layout, and
+  doesn't solve write concurrency once Airflow enters the picture.
+- **Consequences:** the gain is a real data interface (`DSN` + schema)
+  instead of a file path; the cost is depending on Postgres running (local
+  via Docker) even for tests, which now use `testcontainers` and require
+  Docker on the machine running `pytest`. Revisit if series volume ever
+  justifies swapping Postgres for something columnar.
 
-### 2026-08-19 — Airflow com LocalExecutor, sem testar o DAG via pytest local
+### 2026-08-19 — Airflow with LocalExecutor, no local pytest DAG test
 
-- **Contexto:** o próximo consumidor do Postgres precisa de agendamento, não
-  só de execução manual por CLI. As opções de executor do Airflow vão de
-  `SequentialExecutor` (um único worker, sem paralelismo real) a
-  `CeleryExecutor`/`KubernetesExecutor` (workers distribuídos, exige
-  Redis/broker e mais serviços no compose).
-- **Decisão:** `LocalExecutor` — paraleliza tasks numa única máquina sem
-  precisar de um broker externo. O DAG (`dags/ingestao_fred.py`) só orquestra;
-  a lógica de ingestão continua em `src/`, testada por `pytest` fora do
-  Airflow. A imagem do Airflow é construída localmente
-  (`docker/airflow/Dockerfile`) instalando este pacote via `pip install`, em
-  vez de montar `src/` como volume — a imagem fica autocontida e igual em dev
-  e CI. Não instalei `apache-airflow` como dependência de teste local: a
-  instalação nativa no Windows deste ambiente de dev quebraria o `uv sync` do
-  projeto (Airflow não é oficialmente suportado fora de Linux/contêiner). A
-  verificação de que o DAG importa sem erro roda dentro do container, num job
-  de CI separado.
-- **Alternativas:** `CeleryExecutor` — mais próximo de produção real, mas
-  adiciona Redis e workers para um volume de dados que não precisa disso
-  ainda. Instalar `apache-airflow` no `dev` do `pyproject.toml` para testar
-  localmente — tentei evitar por causa da fragilidade de instalação no
-  Windows e porque o valor de testar a estrutura do DAG fora do container é
-  baixo comparado ao custo de manter essa dependência pesada.
-- **Consequências:** ganho é orquestração real, testável e sem infraestrutura
-  externa além do Docker que o projeto já exige; custo é que qualquer teste
-  do DAG em si só roda dentro de um container Linux — se um dia isso for uma
-  fricção real de desenvolvimento, reveja a instalação nativa via WSL2.
+- **Context:** the next Postgres consumer needs scheduling, not just manual
+  CLI runs. Airflow's executor options range from `SequentialExecutor` (a
+  single worker, no real parallelism) to
+  `CeleryExecutor`/`KubernetesExecutor` (distributed workers, requiring
+  Redis/a broker and more services in the compose file).
+- **Decision:** `LocalExecutor` — parallelizes tasks on a single machine
+  without needing an external broker. The DAG (`dags/ingest_fred.py`) only
+  orchestrates; the ingestion logic stays in `src/`, tested by `pytest`
+  outside Airflow. The Airflow image is built locally
+  (`docker/airflow/Dockerfile`) by `pip install`-ing this package, instead
+  of mounting `src/` as a volume — the image stays self-contained and
+  identical in dev and CI. I didn't add `apache-airflow` as a local test
+  dependency: installing it natively on this dev environment's Windows would
+  break the project's `uv sync` (Airflow isn't officially supported outside
+  Linux/a container). Verifying that the DAG imports without error runs
+  inside the container, in a separate CI job.
+- **Alternatives:** `CeleryExecutor` — closer to real production, but adds
+  Redis and workers for a data volume that doesn't need it yet. Installing
+  `apache-airflow` in `pyproject.toml`'s `dev` group to test locally — I
+  tried to avoid this because of how fragile the install is on Windows, and
+  because the value of testing the DAG's structure outside the container is
+  low compared to the cost of maintaining that heavy dependency.
+- **Consequences:** the gain is real, testable orchestration with no
+  external infrastructure beyond the Docker the project already requires;
+  the cost is that any test of the DAG itself only runs inside a Linux
+  container — if that ever becomes real development friction, revisit a
+  native install via WSL2.
+
+### 2026-08-19 — Move source contracts and ingestion into per-source modules
+
+- **Context:** `contratos.py` and `ingestao.py` were "generic" files that
+  only had FRED inside; that was going to become a file that grows per
+  source, the opposite of what its name promised, right before a second
+  source arrives.
+- **Decision:** `FredObservation`/`FredResponse` moved into `sources/fred.py`
+  (the contract lives next to the adapter that produces it);
+  `ingest_fred` became `ingestion/fred.py` (a folder, one file per source,
+  matching `sources/`'s pattern). `analytics.publish()` stopped importing
+  `FredObservation` by name and instead requires a structural `Protocol`
+  (`analytics.Observation`, four fields) — the layer that's genuinely
+  source-agnostic can't depend on a type with a source's name in the middle.
+  Rule recorded in the README: one file per source is the default; it
+  becomes a folder (`sources/<source>/{__init__,contracts,...}.py`) once a
+  source accumulates real complexity (multiple endpoints, non-trivial
+  parsing, a large contract) — decided source by source, not all at once.
+  `dags/` stays flat (`ingest_<source>.py`), Airflow's standard convention,
+  no subfolder.
+- **Alternatives:** none seriously considered — the file was already growing
+  in the wrong direction and the second source was imminent.
+- **Consequences:** more files for a single-source project today, but the
+  next source (BCB SGS) adds `sources/bcb.py` and `ingestion/bcb.py` without
+  touching FRED's files. Revisit only if the per-source split itself proves
+  wrong once BCB is in.

@@ -1,35 +1,37 @@
-# Contrato do projeto — Dados Mercado Publico
+# Project contract — Public Market Data
 
-Leia o `CLAUDE.md` global e use este arquivo para o que é específico deste
-repositório.
+Read the global `CLAUDE.md` and use this file for what's specific to this
+repository.
 
-## Resultado do produto
+## Product outcome
 
-- **Problema:** análise quantitativa exige saber o que estava disponível numa
-  data passada, não a revisão de hoje. As fontes públicas de macro entregam a
-  safra corrente e sobrescrevem o rastro anterior sem avisar, o que produz
-  backtest otimista por vazamento de informação futura.
-- **Usuário:** eu, e os projetos que consomem esta base — risco quantitativo e
-  agente de research.
-- **Saída verificável:** zona bruta particionada por coleta, com manifesto, e
-  uma tabela Postgres (`series_vintage`) consultável por data de conhecimento.
-  Uma consulta em data passada não enxerga revisão publicada depois dela.
-- **Fonte de dados permitida:** FRED/ALFRED, BCB SGS, CVM Dados Abertos, SEC
-  EDGAR, B3 COTAHIST e Stooq. Nenhum dado, metodologia ou credencial do
-  trabalho, em nenhuma hipótese.
-- **Menor corte ponta a ponta:** `ingerir --fonte fred --serie GDP` grava a zona
-  bruta com manifesto e publica em `series_vintage`; `consultar --serie GDP --em
-  2020-06-30` devolve o valor que era conhecido naquela data.
-- **Fora de escopo:** modelo, sinal e backtest (isso é outro repositório);
-  dado intradiário; e qualquer fonte que exija credencial institucional.
-- **Interface pública:** `series_vintage` é o contrato para os projetos
-  consumidores (risco quantitativo, agente de research). Eles leem via
-  `DADOS_MERCADO_PUBLICO_POSTGRES_DSN`, nunca importam código deste
-  repositório.
+- **Problem:** quantitative analysis needs to know what was available on a
+  past date, not today's revision. Public macro sources deliver the current
+  vintage and overwrite the previous trail without warning, which produces
+  an optimistic backtest from a future-information leak.
+- **User:** me, and the projects that consume this base — quantitative risk
+  and the research agent.
+- **Verifiable output:** a raw zone partitioned by collection run, with a
+  manifest, and a Postgres table (`series_vintage`) queryable by knowledge
+  date. A query on a past date doesn't see a revision published after it.
+- **Allowed data source:** FRED/ALFRED, BCB SGS, CVM Dados Abertos, SEC
+  EDGAR, B3 COTAHIST, and Stooq. No data, methodology, or credential from
+  work, under any circumstance.
+- **Smallest end-to-end cut:** `ingest --source fred --series GDP` writes the
+  raw zone with a manifest and publishes to `series_vintage`;
+  `query --series GDP --at 2020-06-30` returns the value that was known on
+  that date.
+- **Out of scope:** models, signals, and backtesting (that's a different
+  repository); intraday data; and any source requiring institutional
+  credentials.
+- **Public interface:** `series_vintage` is the contract for the consuming
+  projects (quantitative risk, research agent). They read via
+  `DADOS_MERCADO_PUBLICO_POSTGRES_DSN`, never import code from this
+  repository.
 
-Não implemente enquanto um `PREENCHER` que altere o design continuar em aberto.
+Do not implement while a `FILL_IN` that changes the design is still open.
 
-## Comandos
+## Commands
 
 ```bash
 uv sync
@@ -37,76 +39,79 @@ uv run python scripts/format.py
 uv run python scripts/check.py
 ```
 
-## Regras locais
+## Local rules
 
-- O pacote é `dados_mercado_publico` e vive em `src/dados_mercado_publico`.
-- Notebook importa de `src/`; código de produção nunca importa notebook.
-- Configuração vem de ambiente por `Settings`.
-- Preserve dado bruto e metadados temporais quando houver ingestão.
-- Atualize este arquivo quando uma decisão estrutural mudar.
+- The package is `public_market_data` and lives in `src/public_market_data`.
+- Notebooks import from `src/`; production code never imports a notebook.
+- Configuration comes from the environment via `Settings`.
+- Preserve raw data and time-vintage metadata whenever there's ingestion.
+- Update this file when a structural decision changes.
 
-## Estilo
+## Style
 
-Código público, lido por gente. A regra é contenção — a lista completa está em
-`AGENTS.md`, seção "Style", e vale igual para mim e para o Codex.
+Public code, read by people. The rule is restraint — the full list is in
+`AGENTS.md`, "Style" section, and applies equally to me and to Codex.
 
-- Comentário explica *por quê*, nunca *o quê*. Se parafraseia a linha abaixo,
-  apague; se a linha precisa de paráfrase, renomeie a variável.
-- Docstring só onde a assinatura não basta (unidade, fuso, efeito colateral,
-  o que levanta). Helper privado de três linhas não leva.
-- Teste afirma comportamento que pode quebrar, não constante. Cobertura é
-  consequência de testar o que importa, nunca meta a inflar.
-- Não capture exceção que não sabe tratar; não abstraia com um único chamador.
+- A comment explains *why*, never *what*. If it paraphrases the line below,
+  delete it; if the line needs paraphrasing, rename the variable instead.
+- Docstrings only where the signature isn't enough (unit, timezone, side
+  effect, what it raises). A three-line private helper doesn't need one.
+- Tests assert behavior that can break, not a constant. Coverage is a
+  consequence of testing what matters, never a target to inflate.
+- Don't catch an exception you don't know how to handle; don't abstract for
+  a single caller.
 
-## Autoria dos commits
+## Commit authorship
 
-Autor e committer são um só: o dono do repositório. Nenhum `Co-Authored-By:`,
-nenhum trailer de sessão, nenhuma menção a Claude, Codex ou ferramenta. Não
-altere `user.name` nem `user.email`.
+Author and committer are one and the same: the repository owner. No
+`Co-Authored-By:`, no session trailer, no mention of Claude, Codex or any
+tool. Don't change `user.name` or `user.email`.
 
-## Estado da sessão
+## Session state
 
-- **Decidido:** primeiro corte entregue — FRED/ALFRED da fonte à consulta
-  point-in-time, com zona bruta imutável, manifesto e idempotência por hash.
-  A consulta filtra pela janela de vigência da fonte, não pela data de coleta.
-- **Decidido:** segundo corte entregue — a camada analítica trocou de
-  Parquet/DuckDB para Postgres (`series_vintage`), local via
-  `docker-compose.yml`. A idempotência passou a ser `ON CONFLICT DO NOTHING`
-  na chave `(fonte, serie, data_evento, data_publicacao)`, em vez de dedup em
-  memória. Testes usam Postgres efêmero via `testcontainers` — exigem Docker
-  rodando na máquina que roda `pytest`.
-- **Decidido:** terceiro corte entregue — orquestração via Airflow
-  (`LocalExecutor`, sem Celery/Redis), imagem própria em
-  `docker/airflow/Dockerfile` que instala este pacote, DAG `ingestao_fred`
-  (`dags/ingestao_fred.py`) chamando `ingestao.ingerir_fred` — sem duplicar
-  lógica. Metadado do Airflow em banco Postgres separado (`airflow`) na mesma
-  instância do `series_vintage`. Testado subindo o stack de verdade
-  (`docker compose build/up`) e confirmando `airflow dags list-import-errors`
-  vazio e a task `ingerir` registrada — não há teste de unidade local do DAG
-  porque instalar `apache-airflow` nativamente no ambiente de dev (Windows)
-  quebraria o `uv sync` do projeto; o CI valida isso num job separado
-  (`airflow-dag` em `.github/workflows/ci.yml`) que builda a imagem e roda
-  `airflow dags list-import-errors` dentro do container.
-- **Decidido:** quarto corte — reorganização por fonte, antes da 2ª fonte
-  chegar. `contratos.py` e `ingestao.py` eram arquivos "genéricos" que só
-  tinham FRED dentro; isso ia virar um arquivo crescendo por fonte, o
-  inverso do que o nome prometia. `ObservacaoFred`/`RespostaFred` foram pra
-  dentro de `fontes/fred.py` (o contrato mora junto do adaptador que o
-  produz); `ingerir_fred` virou `ingestao/fred.py` (pasta, um arquivo por
-  fonte, mesmo padrão de `fontes/`). `analitico.publicar()` parou de
-  importar `ObservacaoFred` pelo nome e passou a exigir um `Protocol`
-  estrutural (`analitico.Observacao`, quatro campos) — a camada
-  verdadeiramente agnóstica de fonte não pode depender de um tipo com nome
-  de fonte no meio. Regra registrada no README: arquivo por fonte é o
-  padrão; vira pasta (`fontes/<fonte>/{__init__,contratos,...}.py`) quando a
-  fonte acumular complexidade real (múltiplos endpoints, parsing não
-  trivial, contrato grande) — decidido fonte a fonte, não de uma vez.
-  `dags/` continua flat (`ingestao_<fonte>.py`), convenção padrão do
-  Airflow, sem subpasta.
-- **Pendente:** chave gratuita do FRED para a coleta ao vivo; os testes rodam
-  offline com fixture versionada e não dependem dela.
-- **Próximo passo:** BCB SGS — a fonte sem safra, que força o limite via
-  `data_disponibilidade` a ser explícito. Primeiro teste real da convenção
-  por fonte: `fontes/bcb.py`, `ingestao/bcb.py`, `dags/ingestao_bcb.py`, e
-  `cli.py` ganha `"bcb"` nas choices de `--fonte`.
-
+- **Decided:** first cut delivered — FRED/ALFRED from source to
+  point-in-time query, with an immutable raw zone, a manifest, and
+  hash-based idempotency. The query filters by the source's validity
+  window, not by collection date.
+- **Decided:** second cut delivered — the analytics layer switched from
+  Parquet/DuckDB to Postgres (`series_vintage`), local via
+  `docker-compose.yml`. Idempotency became `ON CONFLICT DO NOTHING` on the
+  key `(fonte, serie, data_evento, data_publicacao)`, instead of in-memory
+  dedup. Tests use an ephemeral Postgres via `testcontainers` — they require
+  Docker running on the machine that runs `pytest`.
+- **Decided:** third cut delivered — orchestration via Airflow
+  (`LocalExecutor`, no Celery/Redis), a dedicated image in
+  `docker/airflow/Dockerfile` that installs this package, an `ingest_fred`
+  DAG (`dags/ingest_fred.py`) calling `ingestion.ingest_fred` — no
+  duplicated logic. Airflow's metadata lives in a separate Postgres database
+  (`airflow`) on the same instance as `series_vintage`. Tested by bringing
+  up the real stack (`docker compose build/up`) and confirming
+  `airflow dags list-import-errors` is empty and the `ingest` task is
+  registered — there's no local unit test for the DAG because installing
+  `apache-airflow` natively in the dev environment (Windows) would break the
+  project's `uv sync`; CI validates this in a separate job
+  (`airflow-dag` in `.github/workflows/ci.yml`) that builds the image and
+  runs `airflow dags list-import-errors` inside the container.
+- **Decided:** fourth cut — reorganize by source, ahead of the 2nd source
+  arriving. `contratos.py` and `ingestao.py` were "generic" files that only
+  had FRED inside; that was going to become a file growing per source, the
+  opposite of what its name promised. `FredObservation`/`FredResponse` moved
+  into `sources/fred.py` (the contract lives next to the adapter that
+  produces it); `ingest_fred` became `ingestion/fred.py` (a folder, one file
+  per source, matching `sources/`'s pattern). `analytics.publish()` stopped
+  importing `FredObservation` by name and instead requires a structural
+  `Protocol` (`analytics.Observation`, four fields) — the layer that's
+  genuinely source-agnostic can't depend on a type with a source's name in
+  the middle. Rule recorded in the README: one file per source is the
+  default; it becomes a folder (`sources/<source>/{__init__,contracts,...}.py`)
+  once a source accumulates real complexity (multiple endpoints,
+  non-trivial parsing, a large contract) — decided source by source, not all
+  at once. `dags/` stays flat (`ingest_<source>.py`), Airflow's standard
+  convention, no subfolder.
+- **Pending:** a free FRED key for live collection; tests run offline with a
+  versioned fixture and don't depend on it.
+- **Next step:** BCB SGS — the source without vintages, which forces the
+  `data_disponibilidade` upper bound to be explicit. The first real test of
+  the per-source convention: `sources/bcb.py`, `ingestion/bcb.py`,
+  `dags/ingest_bcb.py`, and `cli.py` gets `"bcb"` added to `--source`'s
+  choices.

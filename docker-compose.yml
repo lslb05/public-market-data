@@ -7,11 +7,11 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://dados:dados@postgres:5432/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-    # Rede interna do compose: a aplicação, dentro do container, fala com o
-    # Postgres pela porta 5432 de sempre — o remapeamento para 5433 é só no
-    # host, para não colidir com outro Postgres desta máquina.
+    # Compose's internal network: the application, inside the container,
+    # talks to Postgres on the usual port 5432 — remapping to 5433 is only
+    # on the host, to avoid colliding with another Postgres on this machine.
     DADOS_MERCADO_PUBLICO_POSTGRES_DSN: postgresql://dados:dados@postgres:5432/dados_mercado_publico
-    DADOS_MERCADO_PUBLICO_FRED_API_KEY: ${DADOS_MERCADO_PUBLICO_FRED_API_KEY:-}
+    PUBLIC_MARKET_DATA_FRED_API_KEY: ${PUBLIC_MARKET_DATA_FRED_API_KEY:-}
   volumes:
     - ./dags:/opt/airflow/dags
   depends_on:
@@ -26,7 +26,7 @@ services:
       POSTGRES_PASSWORD: dados
       POSTGRES_DB: dados_mercado_publico
     ports:
-      # 5433 no host: 5432 já está ocupado por outro Postgres nesta máquina.
+      # 5433 on the host: 5432 is already taken by another Postgres on this machine.
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data

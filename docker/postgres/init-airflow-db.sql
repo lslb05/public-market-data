@@ -1,4 +1,4 @@
--- Executado só na primeira inicialização do volume: cria o banco de
--- metadados do Airflow separado do banco de dados da aplicação
--- (dados_mercado_publico), que o POSTGRES_DB da imagem já cria.
+-- Runs only on the volume's first initialization: creates Airflow's metadata
+-- database separate from the application database (dados_mercado_publico),
+-- which the image's POSTGRES_DB already creates.
 CREATE DATABASE airflow;

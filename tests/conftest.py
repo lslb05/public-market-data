@@ -6,38 +6,39 @@ import psycopg
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
-from dados_mercado_publico.postgres import conectar
+from public_market_data.postgres import connect
 
-CriaCliente = Callable[[int, bytes], tuple[httpx.Client, list[int]]]
+MakeMockClient = Callable[[int, bytes], tuple[httpx.Client, list[int]]]
 
 
 @pytest.fixture
-def corpo_fred() -> bytes:
+def fred_body() -> bytes:
     return (Path(__file__).parent / "fixtures" / "fred_gdp.json").read_bytes()
 
 
 @pytest.fixture
-def cliente_falso() -> CriaCliente:
-    """Cria um cliente httpx que responde sempre igual e conta as chamadas."""
+def make_mock_client() -> MakeMockClient:
+    """Creates an httpx client that always responds the same way and counts calls."""
 
-    def criar(status: int, corpo: bytes) -> tuple[httpx.Client, list[int]]:
-        chamadas: list[int] = []
+    def make(status: int, body: bytes) -> tuple[httpx.Client, list[int]]:
+        calls: list[int] = []
 
-        def responder(_: httpx.Request) -> httpx.Response:
-            chamadas.append(status)
-            return httpx.Response(status, content=corpo)
+        def respond(_: httpx.Request) -> httpx.Response:
+            calls.append(status)
+            return httpx.Response(status, content=body)
 
-        return httpx.Client(transport=httpx.MockTransport(responder)), chamadas
+        return httpx.Client(transport=httpx.MockTransport(respond)), calls
 
-    return criar
+    return make
 
 
 @pytest.fixture(scope="session")
 def _postgres_dsn() -> Iterator[str]:
-    """Sobe um Postgres efêmero em container para a sessão de testes inteira.
+    """Brings up an ephemeral containerized Postgres for the whole test session.
 
-    Um container por sessão em vez de por teste: subir o container é o que
-    pesa; isolar dado entre testes é responsabilidade da fixture `conexao`.
+    One container per session instead of per test: bringing up the container
+    is what's expensive; isolating data between tests is the `connection`
+    fixture's job.
     """
     with PostgresContainer("postgres:16-alpine") as container:
         url = container.get_connection_url()
@@ -45,16 +46,16 @@ def _postgres_dsn() -> Iterator[str]:
 
 
 @pytest.fixture
-def conexao(_postgres_dsn: str) -> Iterator[psycopg.Connection]:
-    conexao = conectar(_postgres_dsn)
-    conexao.execute("TRUNCATE TABLE series_vintage")
-    yield conexao
-    conexao.close()
+def connection(_postgres_dsn: str) -> Iterator[psycopg.Connection]:
+    connection = connect(_postgres_dsn)
+    connection.execute("TRUNCATE TABLE series_vintage")
+    yield connection
+    connection.close()
 
 
 @pytest.fixture
 def dsn(_postgres_dsn: str) -> Iterator[str]:
-    conexao = conectar(_postgres_dsn)
-    conexao.execute("TRUNCATE TABLE series_vintage")
-    conexao.close()
+    connection = connect(_postgres_dsn)
+    connection.execute("TRUNCATE TABLE series_vintage")
+    connection.close()
     yield _postgres_dsn

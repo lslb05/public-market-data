@@ -1,189 +1,198 @@
-# dados-mercado-publico
+# public-market-data
 
-Ingestão de dados públicos de mercado que preserva **o que se sabia em cada
-data**, para que análise histórica não use revisão futura.
+Public market data ingestion that preserves **what was known on each date**,
+so historical analysis doesn't use a future revision.
 
-## O problema
+## The problem
 
-Série macroeconômica é revisada. FRED, BCB e IBGE entregam a leitura de hoje e
-sobrescrevem a anterior sem deixar rastro. Um backtest construído sobre isso vê,
-numa data de 2020, um PIB que só foi publicado em 2021 — e fica otimista por um
-vazamento de informação futura que não aparece em log nenhum.
+Macro series get revised. FRED, BCB, and IBGE deliver today's reading and
+overwrite the previous one without leaving a trace. A backtest built on top
+of that sees, on a 2020 date, a GDP figure that was only published in 2021 —
+and turns optimistic from a future-information leak that shows up in no log
+anywhere.
 
-Este repositório guarda a safra: cada valor carrega quando passou a valer e até
-quando foi a leitura corrente.
+This repository keeps the vintage: every value carries when it started being
+valid and until when it was the current reading.
 
-## Resultado
+## Result
 
-A mesma série, no mesmo período de referência, consultada em duas datas:
+The same series, for the same reference period, queried on two dates:
 
 ```console
-$ uv run python -m dados_mercado_publico consultar --fonte fred --serie GDP --em 2020-05-01
-data_evento,valor
+$ uv run python -m public_market_data query --source fred --series GDP --at 2020-05-01
+event_date,value
 2020-01-01,21561.139
 
-$ uv run python -m dados_mercado_publico consultar --fonte fred --serie GDP --em 2020-06-01
-data_evento,valor
+$ uv run python -m public_market_data query --source fred --series GDP --at 2020-06-01
+event_date,value
 2020-01-01,21481.367
 ```
 
-O PIB do primeiro trimestre de 2020 valia 21.561,139 para quem olhasse em maio.
-A revisão de 28/05 mudou o número para 21.481,367. Uma consulta em maio não
-enxerga a revisão de junho — que é justamente o ponto.
+Q1 2020 GDP was 21,561.139 to anyone looking in May. The 05/28 revision
+changed the number to 21,481.367. A May query doesn't see the June
+revision — which is exactly the point.
 
-A transcrição acima foi produzida com a fixture versionada em
-`tests/fixtures/`, porque a coleta ao vivo exige chave do FRED. O caminho de
-código é o mesmo; só a chamada HTTP é substituída.
+The transcript above was produced with the fixture versioned in
+`tests/fixtures/`, because a live fetch needs a FRED key. The code path is
+the same; only the HTTP call is swapped.
 
-## Problema e escopo
+## Problem and scope
 
-- **Usuário:** eu, e os projetos que consomem esta base — risco quantitativo e
-  agente de research.
-- **Decisão:** permite reconstruir uma série como ela era numa data passada,
-  sem contaminar backtest com revisão posterior.
-- **Entrada:** FRED/ALFRED, via API pública com chave gratuita. As séries são de
-  domínio público; a documentação da API está em
+- **User:** me, and the projects that consume this base — quantitative risk
+  and the research agent.
+- **Outcome:** lets a series be reconstructed as it was on a past date,
+  without contaminating a backtest with a later revision.
+- **Input:** FRED/ALFRED, via a public API with a free key. The series are
+  public domain; the API docs are at
   <https://fred.stlouisfed.org/docs/api/fred/>.
-- **Fora de escopo:** modelo, sinal e backtest, que são outro repositório;
-  dado intradiário; e qualquer fonte que exija credencial institucional.
+- **Out of scope:** models, signals, and backtesting, which are a different
+  repository; intraday data; and any source requiring institutional
+  credentials.
 
-## Arquitetura
+## Architecture
 
 ```
-Airflow (DAG ingestao_fred, @daily)
-    │  chama dados_mercado_publico.ingestao.fred.ingerir_fred
+Airflow (ingest_fred DAG, @daily)
+    │  calls public_market_data.ingestion.fred.ingest_fred
     ▼
-API do FRED
-    │  httpx, timeout e 3 tentativas
+FRED API
+    │  httpx, timeout, and 3 attempts
     ▼
-fontes/fred.py     adaptador: busca + contrato Pydantic (ObservacaoFred).
-    │               campo novo no payload é mudança de schema, levanta erro
+sources/fred.py    adapter: fetch + Pydantic contract (FredObservation).
+    │               a new field in the payload is a schema change, raises
     │
-    ├─► bruto.py       data/bruto/<fonte>/<serie>/coleta=<carimbo>/
-    │                  dados.json (o que a fonte mandou, byte a byte)
-    │                  manifesto.json (url, sha256, contrato, linhas)
+    ├─► raw.py         data/raw/<source>/<series>/collected=<timestamp>/
+    │                  data.json (exactly what the source sent, byte for byte)
+    │                  manifest.json (url, sha256, contract, rows)
     │
-    └─► analitico.py   Postgres, tabela series_vintage
-                       consulta por data de conhecimento
+    └─► analytics.py   Postgres, series_vintage table
+                       queried by knowledge date
 ```
 
-O DAG (`dags/ingestao_fred.py`) não duplica lógica: chama a mesma função que
-o CLI chama. A única coisa que o Airflow adiciona é agendamento e retentativa
-de orquestração — a idempotência e o tratamento de erro de fonte já existiam.
+The DAG (`dags/ingest_fred.py`) doesn't duplicate logic: it calls the same
+function the CLI calls. The only thing Airflow adds is scheduling and
+orchestration retries — idempotency and source-error handling already
+existed.
 
-**Organização por fonte, pensada para a próxima fonte entrar sem bagunçar a
-atual.** `fontes/<fonte>.py` é o adaptador (fala com a API, valida o payload
-e devolve objetos que satisfazem `analitico.Observacao` — um `Protocol`
-estrutural de quatro campos, não uma classe pra herdar). `ingestao/<fonte>.py`
-é o caso de uso que liga esse adaptador ao genérico (`bruto`, `analitico`,
-`postgres`) — por isso é uma pasta separada de `fontes/`, não o mesmo
-arquivo: adaptador e orquestração mudam por motivos diferentes. O que é
-realmente agnóstico de fonte (`bruto.py`, `postgres.py`, `analitico.py`,
-`erros.py`, `schema.sql`, `cli.py`) fica solto na raiz do pacote, sem pasta,
-porque não cresce por fonte — cresce por decisão de infraestrutura.
+**Organized by source, designed so the next source can arrive without
+disturbing the current one.** `sources/<source>.py` is the adapter (talks to
+the API, validates the payload, and returns objects that satisfy
+`analytics.Observation` — a four-field structural `Protocol`, not a class to
+inherit from). `ingestion/<source>.py` is the use case that wires that
+adapter to the generic layer (`raw`, `analytics`, `postgres`) — that's why
+it's a separate folder from `sources/`, not the same file: the adapter and
+the orchestration change for different reasons. What's genuinely
+source-agnostic (`raw.py`, `postgres.py`, `analytics.py`, `errors.py`,
+`schema.sql`, `cli.py`) sits loose at the package root, with no folder,
+because it doesn't grow per source — it grows by infrastructure decisions.
 
-Fonte simples (FRED, um endpoint JSON) cabe num arquivo só. Fonte mais
-complexa (ex.: CVM, com múltiplos datasets e download de ZIP) vira uma pasta
-— `fontes/cvm/{__init__.py, contratos.py, download.py}` — quando acumular
-mais de um motivo pra dividir (parsing não trivial, contrato grande,
-paginação própria). A promoção de arquivo pra pasta é decidida fonte a
-fonte, quando a complexidade real aparecer, não antecipada para todas de
-uma vez.
+A simple source (FRED, one JSON endpoint) fits in a single file. A more
+complex source (e.g. CVM, with multiple datasets and ZIP downloads) becomes
+a folder — `sources/cvm/{__init__.py, contracts.py, download.py}` — once it
+accumulates more than one reason to split (non-trivial parsing, a large
+contract, its own pagination). Promoting a file to a folder is decided
+source by source, when the real complexity shows up, not anticipated for
+all of them at once.
 
 `series_vintage(fonte, serie, data_evento, data_publicacao, vigente_ate,
-valor, data_disponibilidade)` é a interface pública deste projeto: qualquer
-outro repositório lê dela via `DADOS_MERCADO_PUBLICO_POSTGRES_DSN`, sem
-importar código daqui. Chave primária `(fonte, serie, data_evento,
-data_publicacao)` — mesma chave de idempotência de sempre.
+valor, data_disponibilidade)` is this project's public interface: any other
+repository reads from it via `DADOS_MERCADO_PUBLICO_POSTGRES_DSN`, without
+importing code from here. (Table and column names stay in Portuguese
+deliberately — they're the shared contract every consuming repo already
+reads by name; renaming them would be a breaking change across the
+portfolio, not a translation.) Primary key `(fonte, serie, data_evento,
+data_publicacao)` — the same idempotency key as always.
 
-Três decisões que valem explicação:
+Three decisions worth explaining:
 
-**Três datas em toda linha.** `data_evento` é o período de referência,
-`data_publicacao` é quando a fonte divulgou aquele valor, `data_disponibilidade`
-é quando nós coletamos. O ALFRED devolve as duas primeiras em
-`realtime_start`/`realtime_end`, e é esse par que a consulta usa.
+**Three dates on every row.** `data_evento` is the reference period,
+`data_publicacao` is when the source announced that value, and
+`data_disponibilidade` is when we collected it. ALFRED returns the first two
+as `realtime_start`/`realtime_end`, and that pair is what the query uses.
 
-**A data de coleta não filtra a consulta — para esta fonte.** O ALFRED publica a
-janela real de vigência de cada safra, então ele é a autoridade. Fonte sem safra
-é outra história: para o BCB SGS, que só devolve a leitura corrente, o instante
-da nossa coleta passa a ser o único limite superior confiável. Essa diferença é
-uma limitação real e está registrada aqui em vez de maquiada.
+**The collection date doesn't filter the query — for this source.** ALFRED
+publishes each vintage's real validity window, so it's the authority. A
+source without vintages is a different story: for BCB SGS, which only
+returns the current reading, the instant of our own collection becomes the
+only reliable upper bound. That difference is a real limitation, documented
+here instead of papered over.
 
-**Idempotência por hash do corpo.** Reexecutar a ingestão sem que a fonte tenha
-mudado não cria partição nova nem duplica linha adiante. A chave da camada
-analítica é `(fonte, serie, data_evento, data_publicacao)`, e a primeira
-ocorrência vence, preservando quando aquele valor foi visto pela primeira vez —
-é por isso que o Airflow pode reexecutar o DAG livremente sem duplicar dado.
+**Idempotency by hashing the body.** Rerunning ingestion when the source
+hasn't changed doesn't create a new partition or duplicate a row downstream.
+The analytics layer's key is `(fonte, serie, data_evento, data_publicacao)`,
+and the first occurrence wins, preserving when that value was first seen —
+which is why Airflow can freely rerun the DAG without duplicating data.
 
-## Executar localmente
+## Running locally
 
-Requisitos: Python 3.12, [`uv`](https://docs.astral.sh/uv/) e Docker (para o
-Postgres local).
+Requirements: Python 3.12, [`uv`](https://docs.astral.sh/uv/), and Docker
+(for the local Postgres).
 
 ```bash
 uv sync
-cp .env.example .env      # e preencha a chave do FRED
-docker compose up -d      # sobe o Postgres em localhost:5433
-uv run python -m dados_mercado_publico ingerir --fonte fred --serie GDP
-uv run python -m dados_mercado_publico consultar --fonte fred --serie GDP --em 2020-05-01
+cp .env.example .env      # and fill in the FRED key
+docker compose up -d      # brings up Postgres on localhost:5433
+uv run python -m public_market_data ingest --source fred --series GDP
+uv run python -m public_market_data query --source fred --series GDP --at 2020-05-01
 ```
 
-A chave do FRED é gratuita: <https://fredaccount.stlouisfed.org/apikeys>. Sem
-ela o comando `ingerir` orienta e sai com código 2, em vez de estourar. Sem o
-Postgres de pé, qualquer comando orienta e sai com código 2 da mesma forma.
+The FRED key is free: <https://fredaccount.stlouisfed.org/apikeys>. Without
+it the `ingest` command explains what's missing and exits with code 2,
+instead of crashing. Without Postgres up, any command does the same.
 
-O schema (`series_vintage`) é criado automaticamente na primeira conexão —
-não há passo de migração separado.
+The schema (`series_vintage`) is created automatically on the first
+connection — there's no separate migration step.
 
 ### Airflow
 
-`docker-compose.yml` também sobe o Airflow (`LocalExecutor`, sem
-Celery/Redis — é a forma mais simples que ainda é um Airflow real, adequada
-ao volume de um projeto de portfólio):
+`docker-compose.yml` also brings up Airflow (`LocalExecutor`, no
+Celery/Redis — the simplest setup that's still real Airflow, fitting for a
+portfolio project's volume):
 
 ```bash
-docker compose up -d              # postgres + airflow-init (uma vez) + scheduler
+docker compose up -d              # postgres + airflow-init (once) + scheduler
 docker compose up -d airflow-webserver
 ```
 
-UI em <http://localhost:8081> (usuário/senha `admin`/`admin`, criados pelo
-`airflow-init`). O DAG `ingestao_fred` roda `@daily`; para disparar manualmente:
+UI at <http://localhost:8081> (user/password `admin`/`admin`, created by
+`airflow-init`). The `ingest_fred` DAG runs `@daily`; to trigger it manually:
 
 ```bash
-docker compose exec airflow-scheduler airflow dags trigger ingestao_fred
+docker compose exec airflow-scheduler airflow dags trigger ingest_fred
 ```
 
-O metadado do Airflow vive num banco Postgres separado (`airflow`) no mesmo
-servidor do `series_vintage` — dois bancos, uma instância, sem infra extra.
+Airflow's metadata lives in a separate Postgres database (`airflow`) on the
+same server as `series_vintage` — two databases, one instance, no extra
+infrastructure.
 
-Verificação:
+Verification:
 
 ```bash
-uv run python scripts/check.py     # formato, lint, tipos e teste
-uv run python scripts/format.py    # aplica formatação e correções
+uv run python scripts/check.py     # format, lint, types and tests
+uv run python scripts/format.py    # applies formatting and fixes
 ```
 
-## Como foi validado
+## How this was validated
 
-12 testes, 92% de cobertura. O que eles fixam:
+12 tests, 92% coverage. What they pin down:
 
-- consulta em data passada não enxerga revisão publicada depois;
-- reingestão do mesmo conteúdo não duplica partição nem linha;
-- a zona bruta guarda o corpo original byte a byte;
-- o manifesto não contém a chave de API;
-- campo novo no payload para a ingestão em vez de passar batido;
-- `.` do FRED vira nulo, não zero;
-- 4xx não é repetido; 5xx esgota três tentativas e vira erro nomeado.
+- a query on a past date doesn't see a revision published later;
+- reingesting the same content doesn't duplicate a partition or a row;
+- the raw zone stores the original body byte for byte;
+- the manifest doesn't contain the API key;
+- a new field in the payload stops ingestion instead of slipping through;
+- FRED's `.` becomes null, not zero;
+- a 4xx isn't retried; a 5xx exhausts three attempts and becomes a named error.
 
-## Limitações
+## Limitations
 
-- Uma fonte só. BCB SGS, CVM, SEC EDGAR e preço EOD são os próximos cortes —
-  cada uma vira uma task nova no mesmo DAG ou um DAG próprio.
-- O ALFRED expõe safras; nem toda fonte expõe. Onde não houver, o
-  point-in-time será mais fraco e isso ficará documentado por fonte.
-- `LocalExecutor`, não `CeleryExecutor`/`KubernetesExecutor`: paralelismo
-  limitado a uma máquina. Suficiente para o volume de séries deste projeto;
-  reveja se algum dia isso virar gargalo real.
-- Postgres e Airflow locais via `docker-compose`; produção (credencial,
-  backup, alta disponibilidade) fica para quando houver um ambiente real
-  para hospedar.
+- One source only. BCB SGS, CVM, SEC EDGAR, and EOD price are the next cuts —
+  each becomes a new task on the same DAG or its own DAG.
+- ALFRED exposes vintages; not every source does. Where it doesn't,
+  point-in-time will be weaker, and that will be documented per source.
+- `LocalExecutor`, not `CeleryExecutor`/`KubernetesExecutor`: parallelism
+  limited to one machine. Enough for this project's series volume; revisit
+  if that ever becomes a real bottleneck.
+- Postgres and Airflow are local via `docker-compose`; production
+  (credentials, backup, high availability) is deferred until there's a real
+  environment to host it in.

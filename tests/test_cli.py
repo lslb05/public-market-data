@@ -3,45 +3,43 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from dados_mercado_publico.cli import main
-from dados_mercado_publico.ingestao.fred import ingerir_fred
+from public_market_data.cli import main
+from public_market_data.ingestion.fred import ingest_fred
 
-from .conftest import CriaCliente
+from .conftest import MakeMockClient
 
 
 @pytest.fixture(autouse=True)
-def dados_em_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dsn: str) -> None:
-    monkeypatch.setenv("DADOS_MERCADO_PUBLICO_DADOS_DIR", str(tmp_path))
+def data_in_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dsn: str) -> None:
+    monkeypatch.setenv("PUBLIC_MARKET_DATA_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DADOS_MERCADO_PUBLICO_POSTGRES_DSN", dsn)
-    monkeypatch.delenv("DADOS_MERCADO_PUBLICO_FRED_API_KEY", raising=False)
+    monkeypatch.delenv("PUBLIC_MARKET_DATA_FRED_API_KEY", raising=False)
 
 
-def test_ingerir_sem_chave_orienta_em_vez_de_estourar() -> None:
-    assert main(["ingerir", "--fonte", "fred", "--serie", "GDP"]) == 2
+def test_ingest_without_key_explains_instead_of_crashing() -> None:
+    assert main(["ingest", "--source", "fred", "--series", "GDP"]) == 2
 
 
-def test_consultar_serie_nao_ingerida_falha() -> None:
+def test_query_series_not_ingested_fails() -> None:
     assert (
-        main(["consultar", "--fonte", "fred", "--serie", "GDP", "--em", "2020-05-01"])
+        main(["query", "--source", "fred", "--series", "GDP", "--at", "2020-05-01"])
         == 2
     )
 
 
-def test_consultar_imprime_a_safra_daquela_data(
-    cliente_falso: CriaCliente,
-    corpo_fred: bytes,
+def test_query_prints_that_dates_vintage(
+    make_mock_client: MakeMockClient,
+    fred_body: bytes,
     tmp_path: Path,
-    conexao: psycopg.Connection,
+    connection: psycopg.Connection,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    cliente, _ = cliente_falso(200, corpo_fred)
-    ingerir_fred(
-        serie="GDP", chave="chave", raiz=tmp_path, cliente=cliente, conexao=conexao
+    client, _ = make_mock_client(200, fred_body)
+    ingest_fred(
+        series="GDP", api_key="key", root=tmp_path, client=client, connection=connection
     )
 
-    codigo = main(
-        ["consultar", "--fonte", "fred", "--serie", "GDP", "--em", "2020-05-01"]
-    )
+    code = main(["query", "--source", "fred", "--series", "GDP", "--at", "2020-05-01"])
 
-    assert codigo == 0
+    assert code == 0
     assert "21561.139" in capsys.readouterr().out
